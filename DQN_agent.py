@@ -8,10 +8,15 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import random
+import os
 from collections import deque
+
 
 # Create Pacman environment
 env = PacmanEnv()
+
+# create directory for saving episode gifs
+os.makedirs("episode_gifs", exist_ok=True)
 
 # Hyperparameters
 MAX_NUM_EPISODES = 10
@@ -43,15 +48,14 @@ class DQN(nn.Module):
         self.fc2 = nn.Linear(512, action_size)
 
     def forward(self, x):
-        # Input shape should be (batch_size, channels, height, width)
-        # Rearrange to (batch, channels, height, width)
-        x = x.permute(0, 3, 1, 2)
+        x = x.permute(0, 3, 1, 2)  # Ensure correct format
+        print("After permute:", x.shape)  # Debugging shape
         x = torch.relu(self.conv1(x))
         x = torch.relu(self.conv2(x))
         x = torch.relu(self.conv3(x))
-
-        # Flatten the output from conv layers
-        x = x.view(x.size(0), -1)
+        print("After convolutions:", x.shape)  # Debugging shape
+        x = x.reshape(x.size(0), -1)  # Dynamic reshaping
+        print("After reshape:", x.shape)  # Debugging shape
         x = torch.relu(self.fc1(x))
         return self.fc2(x)
 
@@ -116,18 +120,18 @@ print("\nEpisode Results:")
 print("Episode | Steps | Score | Total Reward")
 print("-" * 45)
 
+render_during_training = True
+
+# Run episodes
 try:
-    # Run episodes
     for episode in range(MAX_NUM_EPISODES):
         obs, info = env.reset()
         episode_reward = 0
 
         for step in range(MAX_STEPS_PER_EPISODE):
-            # Render environment
-            env.render()
-
-            # Small delay to make visualization visible
-            time.sleep(0.1)
+            # Render environment only if flag is set
+            if render_during_training:
+                env.render()
 
             # Select action
             action = select_action(obs)
@@ -153,8 +157,9 @@ try:
                 results['episode_scores'].append(info['score'])
                 break
 
-        # Save animation after each episode
-        env.save_animation(f'pacman_episode_{episode+1}.gif')
+        # Save animation only if rendering is enabled
+        if render_during_training:
+            env.save_animation(f'episode_gifs/pacman_episode_{episode+1}.gif')
 
         # Update epsilon
         epsilon = max(EPSILON_END, EPSILON_DECAY * epsilon)
@@ -165,6 +170,20 @@ try:
 
 finally:
     env.close()
+
+# Save animations during evaluation
+print("Saving animations for evaluation episodes...")
+render_during_training = True
+for episode in range(2):  # Run 2 evaluation episodes
+    obs, info = env.reset()
+    while True:
+        env.render()
+        action = select_action(obs)
+        next_state, reward, done, truncated, info = env.step(action)
+        obs = next_state
+        if done or truncated:
+            break
+    env.save_animation(f'eval_episode_{episode+1}.gif')
 
 # Print summary statistics
 print("\nResults Summary:")
