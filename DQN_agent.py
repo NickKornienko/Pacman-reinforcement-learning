@@ -1,195 +1,279 @@
 """
-DQN agent implementation for Pacman environment.
+Advanced DQN agent implementation for Pacman with strategic learning
 """
 from pacman_env import PacmanEnv
-import time
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 import random
 import os
 from collections import deque
 
-
-# Create Pacman environment
-env = PacmanEnv()
-
-# create directory for saving episode gifs
+# Create directory for saving episode gifs
 os.makedirs("episode_gifs", exist_ok=True)
 
 # Hyperparameters
-MAX_NUM_EPISODES = 10
+MAX_NUM_EPISODES = 1000
 MAX_STEPS_PER_EPISODE = 500
 GAMMA = 0.99
-LEARNING_RATE = 0.001
+LEARNING_RATE = 0.0001
 BATCH_SIZE = 32
 MEMORY_SIZE = 10000
-EPSILON_START = 1.0
-EPSILON_END = 0.1
-EPSILON_DECAY = 0.995
-
-# Neural network for Q-function
+TARGET_UPDATE_FREQ = 5
+HIDDEN_SIZE = 512
 
 
-class DQN(nn.Module):
+class StrategicNetwork(nn.Module):
     def __init__(self, action_size):
-        super(DQN, self).__init__()
-        # Convolutional layers to process the 3D input
-        self.conv1 = nn.Conv2d(
-            in_channels=3, out_channels=32, kernel_size=3, stride=1, padding=1)
-        self.conv2 = nn.Conv2d(
-            in_channels=32, out_channels=64, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(
-            in_channels=64, out_channels=64, kernel_size=3, stride=1, padding=1)
+        super(StrategicNetwork, self).__init__()
 
-        # Fully connected layers after flattening
-        self.fc1 = nn.Linear(64 * 20 * 20, 512)
-        self.fc2 = nn.Linear(512, action_size)
+        # Feature extraction
+        self.features = nn.Sequential(
+            nn.Conv2d(3, 32, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1),
+            nn.BatchNorm2d(64),
+            nn.ReLU()
+        )
+
+        # Strategic processing
+        self.strategic = nn.Sequential(
+            nn.Linear(64 * 20 * 20, HIDDEN_SIZE),
+            nn.ReLU(),
+            nn.Linear(HIDDEN_SIZE, HIDDEN_SIZE),
+            nn.ReLU()
+        )
+
+        # Value stream
+        self.value = nn.Sequential(
+            nn.Linear(HIDDEN_SIZE, 256),
+            nn.ReLU(),
+            nn.Linear(256, 1)
+        )
+
+        # Advantage stream
+        self.advantage = nn.Sequential(
+            nn.Linear(HIDDEN_SIZE, 256),
+            nn.ReLU(),
+            nn.Linear(256, action_size)
+        )
+
+        # Initialize weights
+        self.apply(self._init_weights)
+
+    def _init_weights(self, module):
+        if isinstance(module, (nn.Linear, nn.Conv2d)):
+            nn.init.kaiming_normal_(module.weight)
+            if module.bias is not None:
+                module.bias.data.zero_()
 
     def forward(self, x):
-        x = x.permute(0, 3, 1, 2)  # Ensure correct format
-        print("After permute:", x.shape)  # Debugging shape
-        x = torch.relu(self.conv1(x))
-        x = torch.relu(self.conv2(x))
-        x = torch.relu(self.conv3(x))
-        print("After convolutions:", x.shape)  # Debugging shape
-        x = x.reshape(x.size(0), -1)  # Dynamic reshaping
-        print("After reshape:", x.shape)  # Debugging shape
-        x = torch.relu(self.fc1(x))
-        return self.fc2(x)
+        # Ensure input is float and normalized
+        if x.dtype != torch.float32:
+            x = x.float()
+        x = x / 255.0  # Normalize pixel values
+
+        # Ensure correct input shape and make contiguous
+        if len(x.shape) == 3:
+            x = x.unsqueeze(0)
+        x = x.permute(0, 3, 1, 2).contiguous()
+
+        # Extract features
+        x = self.features(x)
+
+        # Flatten and ensure contiguous memory layout
+        x = x.view(x.size(0), -1)
+
+        # Strategic processing
+        x = self.strategic(x)
+
+        # Value and advantage streams
+        value = self.value(x)
+        advantage = self.advantage(x)
+
+        # Combine streams (Dueling architecture)
+        return value + (advantage - advantage.mean(dim=1, keepdim=True))
 
 
-# Initialize DQN
-action_size = env.action_space.n
-policy_net = DQN(action_size)
-target_net = DQN(action_size)
-target_net.load_state_dict(policy_net.state_dict())
-target_net.eval()
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
 
-optimizer = optim.Adam(policy_net.parameters(), lr=LEARNING_RATE)
-memory = deque(maxlen=MEMORY_SIZE)
+    def push(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))
 
-# Epsilon-greedy policy
-epsilon = EPSILON_START
+    def sample(self, batch_size):
+        return random.sample(self.buffer, min(batch_size, len(self.buffer)))
 
-
-def select_action(state):
-    global epsilon
-    # Convert state to tensor and add batch dimension
-    state = torch.tensor(state, dtype=torch.float32).unsqueeze(0)
-    if random.random() < epsilon:
-        return env.action_space.sample()
-    else:
-        with torch.no_grad():
-            return policy_net(state).argmax().item()
+    def __len__(self):
+        return len(self.buffer)
 
 
-def optimize_model():
-    if len(memory) < BATCH_SIZE:
-        return
-    batch = random.sample(memory, BATCH_SIZE)
-    states, actions, rewards, next_states, dones = zip(*batch)
+class StrategicAgent:
+    def __init__(self, state_shape, action_size):
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
+        print(f"Using device: {self.device}")
 
-    states = torch.tensor(states, dtype=torch.float32)
-    actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
-    rewards = torch.tensor(rewards, dtype=torch.float32)
-    next_states = torch.tensor(next_states, dtype=torch.float32)
-    dones = torch.tensor(dones, dtype=torch.float32)
+        self.action_size = action_size
+        self.state_shape = state_shape
 
-    current_q_values = policy_net(states).gather(1, actions).squeeze()
-    next_q_values = target_net(next_states).max(1)[0]
-    expected_q_values = rewards + (GAMMA * next_q_values * (1 - dones))
+        # Networks
+        self.policy_net = StrategicNetwork(action_size).to(self.device)
+        self.target_net = StrategicNetwork(action_size).to(self.device)
+        self.target_net.load_state_dict(self.policy_net.state_dict())
 
-    loss = nn.functional.mse_loss(current_q_values, expected_q_values)
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
+        # Optimizer
+        self.optimizer = optim.Adam(
+            self.policy_net.parameters(), lr=LEARNING_RATE)
 
+        # Memory
+        self.memory = ReplayBuffer(MEMORY_SIZE)
 
-# Store results for documentation
-results = {
-    'episode_steps': [],
-    'episode_rewards': [],
-    'episode_scores': []
-}
+        # Training variables
+        self.steps_done = 0
+        self.episode_rewards = []
 
-print("\nStarting DQN Agent on Pacman Environment")
-print("Actions: 0=UP, 1=RIGHT, 2=DOWN, 3=LEFT")
-print("\nEpisode Results:")
-print("Episode | Steps | Score | Total Reward")
-print("-" * 45)
+    def select_action(self, state, epsilon=0.1):
+        try:
+            if random.random() > epsilon:
+                with torch.no_grad():
+                    state = torch.from_numpy(
+                        state).float().unsqueeze(0).to(self.device)
+                    q_values = self.policy_net(state)
+                    return q_values.max(1)[1].item()
+            return random.randrange(self.action_size)
+        except Exception as e:
+            print(f"Error in select_action: {e}")
+            print(f"State shape: {state.shape}, dtype: {state.dtype}")
+            return random.randrange(self.action_size)
 
-render_during_training = True
+    def optimize(self):
+        if len(self.memory) < BATCH_SIZE:
+            return
 
-# Run episodes
-try:
-    for episode in range(MAX_NUM_EPISODES):
-        obs, info = env.reset()
-        episode_reward = 0
+        try:
+            # Sample transitions
+            transitions = self.memory.sample(BATCH_SIZE)
+            batch = list(zip(*transitions))
 
-        for step in range(MAX_STEPS_PER_EPISODE):
-            # Render environment only if flag is set
-            if render_during_training:
-                env.render()
+            # Prepare batch
+            state_batch = torch.FloatTensor(np.array(batch[0])).to(self.device)
+            action_batch = torch.LongTensor(batch[1]).to(self.device)
+            reward_batch = torch.FloatTensor(batch[2]).to(self.device)
+            next_state_batch = torch.FloatTensor(
+                np.array(batch[3])).to(self.device)
+            done_batch = torch.FloatTensor(batch[4]).to(self.device)
 
-            # Select action
-            action = select_action(obs)
+            # Compute current Q values
+            current_q_values = self.policy_net(
+                state_batch).gather(1, action_batch.unsqueeze(1))
 
-            # Execute action
-            next_state, reward, done, truncated, info = env.step(action)
-            episode_reward += reward
+            # Compute next Q values
+            with torch.no_grad():
+                next_q_values = self.target_net(next_state_batch).max(1)[0]
+                target_q_values = reward_batch + \
+                    (GAMMA * next_q_values * (1 - done_batch))
 
-            # Store transition in memory
-            memory.append((obs, action, reward, next_state, done or truncated))
+            # Compute loss
+            loss = F.smooth_l1_loss(
+                current_q_values, target_q_values.unsqueeze(1))
 
-            # Update observation
-            obs = next_state
+            # Optimize
+            self.optimizer.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+            self.optimizer.step()
 
-            # Optimize the model
-            optimize_model()
+        except Exception as e:
+            print(f"Error in optimize: {e}")
 
-            if done or truncated:
+    def update_target_network(self):
+        self.target_net.load_state_dict(self.policy_net.state_dict())
+
+    def train(self, env, num_episodes=MAX_NUM_EPISODES):
+        print("\nStarting Strategic DQN Training")
+        print(f"State shape: {self.state_shape}")
+        print(f"Action size: {self.action_size}")
+        print("\nEpisode Results:")
+        print("Episode | Steps | Score | Total Reward")
+        print("-" * 45)
+
+        try:
+            for episode in range(num_episodes):
+                state, info = env.reset()
+                total_reward = 0
+                steps = 0
+
+                for step in range(MAX_STEPS_PER_EPISODE):
+                    # Select and perform action
+                    epsilon = max(0.01, 0.1 - episode/200)
+                    action = self.select_action(state, epsilon)
+                    next_state, reward, done, truncated, info = env.step(
+                        action)
+
+                    # Shape reward based on game state
+                    shaped_reward = reward
+                    if reward > 0:  # Eating pellets/ghosts
+                        shaped_reward *= 2.0
+                    elif reward < 0:  # Ghost collision
+                        shaped_reward *= 1.5
+
+                    total_reward += shaped_reward
+                    steps += 1
+
+                    # Store transition
+                    self.memory.push(state, action, shaped_reward,
+                                     next_state, done or truncated)
+                    state = next_state
+
+                    # Optimize model
+                    self.optimize()
+
+                    if done or truncated:
+                        break
+
+                # Update target network
+                if episode % TARGET_UPDATE_FREQ == 0:
+                    self.update_target_network()
+
                 print(
-                    f"Episode #{episode+1:2d} | {step+1:3d}   | {info['score']:3d}  | {episode_reward:5.1f}")
-                results['episode_steps'].append(step+1)
-                results['episode_rewards'].append(episode_reward)
-                results['episode_scores'].append(info['score'])
-                break
+                    f"Episode #{episode+1:2d} | {steps:3d}   | {info['score']:3d}  | {total_reward:5.1f}")
+                self.episode_rewards.append(total_reward)
 
-        # Save animation only if rendering is enabled
-        if render_during_training:
-            env.save_animation(f'episode_gifs/pacman_episode_{episode+1}.gif')
+        except KeyboardInterrupt:
+            print("\nTraining interrupted by user")
+        except Exception as e:
+            print(f"Error during training: {e}")
+        finally:
+            env.close()
 
-        # Update epsilon
-        epsilon = max(EPSILON_END, EPSILON_DECAY * epsilon)
+        return self.episode_rewards
 
-        # Update target network
-        if episode % 2 == 0:
-            target_net.load_state_dict(policy_net.state_dict())
 
-finally:
-    env.close()
+def main():
+    try:
+        env = PacmanEnv()
+        state_shape = (20, 20, 3)  # Height, Width, Channels
+        action_size = 4  # UP, RIGHT, DOWN, LEFT
 
-# Save animations during evaluation
-print("Saving animations for evaluation episodes...")
-render_during_training = True
-for episode in range(2):  # Run 2 evaluation episodes
-    obs, info = env.reset()
-    while True:
-        env.render()
-        action = select_action(obs)
-        next_state, reward, done, truncated, info = env.step(action)
-        obs = next_state
-        if done or truncated:
-            break
-    env.save_animation(f'eval_episode_{episode+1}.gif')
+        agent = StrategicAgent(state_shape, action_size)
+        rewards = agent.train(env)
 
-# Print summary statistics
-print("\nResults Summary:")
-print(f"Average Steps per Episode: {np.mean(results['episode_steps']):.2f}")
-print(f"Average Score per Episode: {np.mean(results['episode_scores']):.2f}")
-print(f"Average Reward per Episode: {np.mean(results['episode_rewards']):.2f}")
-print(f"Best Score: {max(results['episode_scores'])}")
-print(f"Best Reward: {max(results['episode_rewards']):.2f}")
-print("\nAnimation files have been saved as 'pacman_episode_X.gif' for each episode")
+        print("\nTraining Complete!")
+        if rewards:
+            print(f"Average Reward: {np.mean(rewards):.2f}")
+            print(f"Best Reward: {max(rewards):.2f}")
+
+    except Exception as e:
+        print(f"Error in main: {e}")
+
+
+if __name__ == "__main__":
+    main()
