@@ -1,5 +1,5 @@
 """
-Advanced DQN agent implementation for Pacman with strategic learning
+Advanced DQN agent implementation for Pacman with visualization
 """
 from pacman_env import PacmanEnv
 import numpy as np
@@ -10,6 +10,7 @@ import torch.optim as optim
 import random
 import os
 from collections import deque
+import time
 
 # Create directory for saving episode gifs
 os.makedirs("episode_gifs", exist_ok=True)
@@ -23,6 +24,7 @@ BATCH_SIZE = 32
 MEMORY_SIZE = 10000
 TARGET_UPDATE_FREQ = 5
 HIDDEN_SIZE = 512
+RENDER_DELAY = 0.1  # Delay between frames in seconds
 
 
 class StrategicNetwork(nn.Module):
@@ -211,7 +213,15 @@ class StrategicAgent:
                 total_reward = 0
                 steps = 0
 
+                # Create a new gif for this episode
+                env.render()  # Initial render
+
                 for step in range(MAX_STEPS_PER_EPISODE):
+                    # Render the game state
+                    env.render()
+                    # Add delay to make animation visible
+                    time.sleep(RENDER_DELAY)
+
                     # Select and perform action
                     epsilon = max(0.01, 0.1 - episode/200)
                     action = self.select_action(state, epsilon)
@@ -239,12 +249,17 @@ class StrategicAgent:
                     if done or truncated:
                         break
 
+                # Save the episode animation
+                env.save_animation(f'episode_gifs/episode_{episode+1}.gif')
+
                 # Update target network
                 if episode % TARGET_UPDATE_FREQ == 0:
                     self.update_target_network()
 
                 print(
                     f"Episode #{episode+1:2d} | {steps:3d}   | {info['score']:3d}  | {total_reward:5.1f}")
+                print(
+                    f"Saved animation as episode_gifs/episode_{episode+1}.gif")
                 self.episode_rewards.append(total_reward)
 
         except KeyboardInterrupt:
