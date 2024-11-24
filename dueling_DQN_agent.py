@@ -1,5 +1,5 @@
 """
-Sophisticated DQN agent using enhanced Pacman environment
+Sophisticated Dueling DQN agent using enhanced Pacman environment
 """
 from pacman_wrapper import SophisticatedPacmanEnv
 import numpy as np
@@ -16,9 +16,9 @@ import time
 os.makedirs("episode_gifs", exist_ok=True)
 
 
-class SophisticatedNetwork(nn.Module):
+class DuelingNetwork(nn.Module):
     def __init__(self, input_shape, action_size):
-        super(SophisticatedNetwork, self).__init__()
+        super(DuelingNetwork, self).__init__()
 
         # Feature extraction
         self.conv = nn.Sequential(
@@ -76,7 +76,7 @@ class ReplayBuffer:
         return len(self.buffer)
 
 
-class SophisticatedAgent:
+class DuelingDQNAgent:
     def __init__(self, state_shape):
         self.device = torch.device(
             "cuda" if torch.cuda.is_available() else "cpu")
@@ -86,9 +86,9 @@ class SophisticatedAgent:
         self.action_size = 15  # Total number of sophisticated actions
 
         # Networks
-        self.policy_net = SophisticatedNetwork(
+        self.policy_net = DuelingNetwork(
             state_shape[:2], self.action_size).to(self.device)
-        self.target_net = SophisticatedNetwork(
+        self.target_net = DuelingNetwork(
             state_shape[:2], self.action_size).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
 
@@ -233,7 +233,7 @@ def main():
     try:
         env = SophisticatedPacmanEnv()
         state_shape = (20, 20, 3)  # Height, Width, Channels
-        agent = SophisticatedAgent(state_shape)
+        agent = DuelingDQNAgent(state_shape)
         agent.train(env)
     except Exception as e:
         print(f"Error in main: {e}")
