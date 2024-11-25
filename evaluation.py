@@ -6,18 +6,56 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 import torch
 import time
+import os
 from DQN_agent import StrategicAgent
 from sophisticated_DQN_agent import SophisticatedAgent
+from dueling_DQN_agent import DuelingDQNAgent
 from pacman_env import PacmanEnv
 from pacman_wrapper import SophisticatedPacmanEnv
+
+# Create directories for saving models and results
+os.makedirs("trained_models", exist_ok=True)
+os.makedirs("episode_gifs", exist_ok=True)
+os.makedirs("evaluation_results", exist_ok=True)
 
 class AgentEvaluator:
     def __init__(self):
         self.metrics = defaultdict(list)
         self.episode_data = defaultdict(list)
         
-    def evaluate_agent(self, agent, env, num_episodes=50, render=True):
-        """Evaluate an agent's performance"""
+    def save_model(self, agent, agent_name):
+        """Save trained model"""
+        model_path = f"trained_models/{agent_name.lower().replace(' ', '_')}.pth"
+        torch.save({
+            'policy_net_state_dict': agent.policy_net.state_dict(),
+            'target_net_state_dict': agent.target_net.state_dict(),
+            'optimizer_state_dict': agent.optimizer.state_dict(),
+        }, model_path)
+        print(f"Saved model to {model_path}")
+        
+    def load_model(self, agent, agent_name):
+        """Load trained model if available"""
+        model_path = f"trained_models/{agent_name.lower().replace(' ', '_')}.pth"
+        if os.path.exists(model_path):
+            checkpoint = torch.load(model_path)
+            agent.policy_net.load_state_dict(checkpoint['policy_net_state_dict'])
+            agent.target_net.load_state_dict(checkpoint['target_net_state_dict'])
+            agent.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            print(f"Loaded pre-trained model from {model_path}")
+            return True
+        return False
+        
+    def train_and_evaluate_agent(self, agent, env, train_episodes=100, eval_episodes=20, render=True, agent_name=""):
+        """Train and evaluate an agent's performance"""
+        # Try to load pre-trained model
+        if not self.load_model(agent, agent_name):
+            print(f"\nTraining {agent_name} for {train_episodes} episodes...")
+            # Training phase
+            agent.train(env, num_episodes=train_episodes)
+            # Save trained model
+            self.save_model(agent, agent_name)
+        
+        print(f"\nEvaluating {agent_name}...")
         evaluation_metrics = {
             'rewards': [],
             'steps': [],
@@ -30,7 +68,7 @@ class AgentEvaluator:
         wins = 0
         completions = 0
         
-        for episode in range(num_episodes):
+        for episode in range(eval_episodes):
             state, info = env.reset()
             total_reward = 0
             steps = 0
@@ -60,72 +98,104 @@ class AgentEvaluator:
             evaluation_metrics['scores'].append(info['score'])
             
             if render:
-                env.save_animation(f'episode_gifs/eval_episode_{episode+1}.gif')
+                env.save_animation(f'episode_gifs/{agent_name.lower().replace(" ", "_")}_episode_{episode+1}.gif')
+            
+            print(f"Episode {episode+1}/{eval_episodes} - Score: {info['score']} - Steps: {steps}")
         
         # Calculate final metrics
-        evaluation_metrics['win_rate'] = wins / num_episodes
+        evaluation_metrics['win_rate'] = wins / eval_episodes
         evaluation_metrics['avg_score'] = np.mean(evaluation_metrics['scores'])
-        evaluation_metrics['completion_rate'] = completions / num_episodes
+        evaluation_metrics['completion_rate'] = completions / eval_episodes
         
         return evaluation_metrics
 
-    def compare_agents(self, num_episodes=50):
-        """Compare DQN and Sophisticated DQN agents"""
+    def compare_agents(self, train_episodes=100, eval_episodes=20):
+        """Compare Basic DQN, Sophisticated DQN, and Dueling DQN agents"""
         # Initialize environments and agents
         basic_env = PacmanEnv()
         sophisticated_env = SophisticatedPacmanEnv()
+        dueling_env = SophisticatedPacmanEnv()  # Using sophisticated env for dueling since it has 15 actions
         
         state_shape = (20, 20, 3)
         basic_agent = StrategicAgent(state_shape, action_size=4)
         sophisticated_agent = SophisticatedAgent(state_shape)
+        dueling_agent = DuelingDQNAgent(state_shape)  # Removed action_size parameter
         
-        print("\nEvaluating Basic DQN Agent...")
-        basic_metrics = self.evaluate_agent(basic_agent, basic_env, num_episodes)
+        # Train and evaluate each agent
+        basic_metrics = self.train_and_evaluate_agent(
+            basic_agent, basic_env, train_episodes, eval_episodes, agent_name="Basic DQN")
         
-        print("\nEvaluating Sophisticated DQN Agent...")
-        sophisticated_metrics = self.evaluate_agent(sophisticated_agent, sophisticated_env, num_episodes)
+        sophisticated_metrics = self.train_and_evaluate_agent(
+            sophisticated_agent, sophisticated_env, train_episodes, eval_episodes, agent_name="Sophisticated DQN")
+        
+        dueling_metrics = self.train_and_evaluate_agent(
+            dueling_agent, dueling_env, train_episodes, eval_episodes, agent_name="Dueling DQN")
         
         # Store results
         self.metrics['basic_dqn'] = basic_metrics
         self.metrics['sophisticated_dqn'] = sophisticated_metrics
+        self.metrics['dueling_dqn'] = dueling_metrics
         
         # Generate comparison visualizations
         self.plot_comparison()
         
+        # Save metrics to file
+        self.save_metrics()
+        
         # Print comparison summary
         print("\nPerformance Comparison:")
-        print("-" * 50)
-        print(f"Metric              | Basic DQN  | Sophisticated DQN")
-        print("-" * 50)
-        print(f"Average Score       | {basic_metrics['avg_score']:.2f}      | {sophisticated_metrics['avg_score']:.2f}")
-        print(f"Win Rate           | {basic_metrics['win_rate']:.2%}      | {sophisticated_metrics['win_rate']:.2%}")
-        print(f"Completion Rate    | {basic_metrics['completion_rate']:.2%}      | {sophisticated_metrics['completion_rate']:.2%}")
-        print(f"Avg Steps/Episode  | {np.mean(basic_metrics['steps']):.2f}      | {np.mean(sophisticated_metrics['steps']):.2f}")
-        print("-" * 50)
+        print("-" * 65)
+        print(f"Metric              | Basic DQN  | Sophisticated DQN | Dueling DQN")
+        print("-" * 65)
+        print(f"Average Score       | {basic_metrics['avg_score']:.2f}      | {sophisticated_metrics['avg_score']:.2f}            | {dueling_metrics['avg_score']:.2f}")
+        print(f"Win Rate           | {basic_metrics['win_rate']:.2%}      | {sophisticated_metrics['win_rate']:.2%}            | {dueling_metrics['win_rate']:.2%}")
+        print(f"Completion Rate    | {basic_metrics['completion_rate']:.2%}      | {sophisticated_metrics['completion_rate']:.2%}            | {dueling_metrics['completion_rate']:.2%}")
+        print(f"Avg Steps/Episode  | {np.mean(basic_metrics['steps']):.2f}      | {np.mean(sophisticated_metrics['steps']):.2f}            | {np.mean(dueling_metrics['steps']):.2f}")
+        print("-" * 65)
+
+    def save_metrics(self):
+        """Save evaluation metrics to file"""
+        results_path = "evaluation_results/metrics.txt"
+        with open(results_path, 'w') as f:
+            f.write("Performance Comparison:\n")
+            f.write("-" * 65 + "\n")
+            f.write(f"Metric              | Basic DQN  | Sophisticated DQN | Dueling DQN\n")
+            f.write("-" * 65 + "\n")
+            
+            for agent_type in ['basic_dqn', 'sophisticated_dqn', 'dueling_dqn']:
+                metrics = self.metrics[agent_type]
+                f.write(f"Agent: {agent_type}\n")
+                f.write(f"Average Score: {metrics['avg_score']:.2f}\n")
+                f.write(f"Win Rate: {metrics['win_rate']:.2%}\n")
+                f.write(f"Completion Rate: {metrics['completion_rate']:.2%}\n")
+                f.write(f"Average Steps: {np.mean(metrics['steps']):.2f}\n\n")
 
     def plot_comparison(self):
         """Generate comparison plots"""
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # Plot rewards
-        axes[0, 0].plot(self.metrics['basic_dqn']['rewards'], label='Basic DQN')
-        axes[0, 0].plot(self.metrics['sophisticated_dqn']['rewards'], label='Sophisticated DQN')
+        for agent_type in ['basic_dqn', 'sophisticated_dqn', 'dueling_dqn']:
+            label = agent_type.replace('_', ' ').title()
+            axes[0, 0].plot(self.metrics[agent_type]['rewards'], label=label)
         axes[0, 0].set_title('Rewards per Episode')
         axes[0, 0].set_xlabel('Episode')
         axes[0, 0].set_ylabel('Total Reward')
         axes[0, 0].legend()
         
         # Plot scores
-        axes[0, 1].plot(self.metrics['basic_dqn']['scores'], label='Basic DQN')
-        axes[0, 1].plot(self.metrics['sophisticated_dqn']['scores'], label='Sophisticated DQN')
+        for agent_type in ['basic_dqn', 'sophisticated_dqn', 'dueling_dqn']:
+            label = agent_type.replace('_', ' ').title()
+            axes[0, 1].plot(self.metrics[agent_type]['scores'], label=label)
         axes[0, 1].set_title('Scores per Episode')
         axes[0, 1].set_xlabel('Episode')
         axes[0, 1].set_ylabel('Score')
         axes[0, 1].legend()
         
         # Plot steps
-        axes[1, 0].plot(self.metrics['basic_dqn']['steps'], label='Basic DQN')
-        axes[1, 0].plot(self.metrics['sophisticated_dqn']['steps'], label='Sophisticated DQN')
+        for agent_type in ['basic_dqn', 'sophisticated_dqn', 'dueling_dqn']:
+            label = agent_type.replace('_', ' ').title()
+            axes[1, 0].plot(self.metrics[agent_type]['steps'], label=label)
         axes[1, 0].set_title('Steps per Episode')
         axes[1, 0].set_xlabel('Episode')
         axes[1, 0].set_ylabel('Steps')
@@ -133,28 +203,29 @@ class AgentEvaluator:
         
         # Bar plot of win rates and completion rates
         metrics = ['win_rate', 'completion_rate']
-        basic_rates = [self.metrics['basic_dqn'][m] for m in metrics]
-        soph_rates = [self.metrics['sophisticated_dqn'][m] for m in metrics]
-        
         x = np.arange(len(metrics))
-        width = 0.35
+        width = 0.25
         
-        axes[1, 1].bar(x - width/2, basic_rates, width, label='Basic DQN')
-        axes[1, 1].bar(x + width/2, soph_rates, width, label='Sophisticated DQN')
+        # Plot bars for each agent
+        axes[1, 1].bar(x - width, [self.metrics['basic_dqn'][m] for m in metrics], width, label='Basic DQN')
+        axes[1, 1].bar(x, [self.metrics['sophisticated_dqn'][m] for m in metrics], width, label='Sophisticated DQN')
+        axes[1, 1].bar(x + width, [self.metrics['dueling_dqn'][m] for m in metrics], width, label='Dueling DQN')
+        
         axes[1, 1].set_title('Performance Metrics')
         axes[1, 1].set_xticks(x)
         axes[1, 1].set_xticklabels(['Win Rate', 'Completion Rate'])
         axes[1, 1].legend()
         
         plt.tight_layout()
-        plt.savefig('evaluation_results.png')
+        plt.savefig('evaluation_results/comparison_plots.png')
         plt.close()
 
 def main():
     try:
         evaluator = AgentEvaluator()
-        evaluator.compare_agents(num_episodes=50)
-        print("\nEvaluation complete! Results saved to evaluation_results.png")
+        # Train for 100 episodes, evaluate for 20 episodes
+        evaluator.compare_agents(train_episodes=100, eval_episodes=20)
+        print("\nEvaluation complete! Results saved to evaluation_results/")
     except Exception as e:
         print(f"Error during evaluation: {e}")
 
