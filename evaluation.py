@@ -1,5 +1,5 @@
 """
-Evaluation and comparison module for DQN variants
+Evaluation and comparison module for DQN variants with optimized resource usage
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -8,6 +8,7 @@ import torch
 import time
 import os
 import pygame
+import gc  # For garbage collection
 from DQN_agent import StrategicAgent
 from sophisticated_DQN_agent import SophisticatedAgent
 from dueling_DQN_agent import DuelingDQNAgent
@@ -49,7 +50,7 @@ class AgentEvaluator:
     def train_and_evaluate_agent(self, agent, env, train_episodes=20, eval_episodes=10, render=True, agent_name=""):
         """Train and evaluate an agent's performance"""
         try:
-            pygame.init()  # Initialize pygame at the start
+            pygame.init()
             
             # Try to load pre-trained model
             if not self.load_model(agent, agent_name):
@@ -58,6 +59,8 @@ class AgentEvaluator:
                 agent.train(env, num_episodes=train_episodes)
                 # Save trained model
                 self.save_model(agent, agent_name)
+                # Force garbage collection
+                gc.collect()
             
             print(f"\nEvaluating {agent_name}...")
             evaluation_metrics = {
@@ -84,10 +87,10 @@ class AgentEvaluator:
                 steps = 0
                 
                 while True:
-                    if render:
+                    if render and steps % 2 == 0:  # Render every other frame to reduce load
                         try:
                             env.render()
-                            time.sleep(0.05)
+                            time.sleep(0.02)  # Reduced delay
                         except:
                             pass
                     
@@ -98,7 +101,7 @@ class AgentEvaluator:
                     steps += 1
                     state = next_state
                     
-                    if done or truncated:
+                    if done or truncated or steps >= 1000:  # Added step limit
                         if info['score'] > 500:
                             wins += 1
                         if steps < 500:
@@ -109,7 +112,7 @@ class AgentEvaluator:
                 evaluation_metrics['steps'].append(steps)
                 evaluation_metrics['scores'].append(info['score'])
                 
-                if render:
+                if render and episode % 2 == 0:  # Save every other episode's animation
                     try:
                         gif_path = f'episode_gifs/{agent_name.lower().replace(" ", "_")}_eval_{episode+1}.gif'
                         env.save_animation(gif_path)
@@ -118,6 +121,10 @@ class AgentEvaluator:
                         pass
                 
                 print(f"Episode {episode+1}/{eval_episodes} - Score: {info['score']} - Steps: {steps}")
+                
+                # Force garbage collection every few episodes
+                if episode % 3 == 0:
+                    gc.collect()
             
             # Calculate final metrics
             evaluation_metrics['win_rate'] = wins / eval_episodes
@@ -140,6 +147,7 @@ class AgentEvaluator:
             try:
                 env.close()
                 pygame.quit()
+                gc.collect()
             except:
                 pass
 
@@ -159,12 +167,15 @@ class AgentEvaluator:
             # Train and evaluate each agent
             basic_metrics = self.train_and_evaluate_agent(
                 basic_agent, basic_env, train_episodes, eval_episodes, agent_name="Basic DQN")
+            gc.collect()  # Force garbage collection between agents
             
             sophisticated_metrics = self.train_and_evaluate_agent(
                 sophisticated_agent, sophisticated_env, train_episodes, eval_episodes, agent_name="Sophisticated DQN")
+            gc.collect()
             
             dueling_metrics = self.train_and_evaluate_agent(
                 dueling_agent, dueling_env, train_episodes, eval_episodes, agent_name="Dueling DQN")
+            gc.collect()
             
             # Store results
             self.metrics['basic_dqn'] = basic_metrics
@@ -193,6 +204,7 @@ class AgentEvaluator:
         finally:
             try:
                 pygame.quit()
+                gc.collect()
             except:
                 pass
 
@@ -215,6 +227,7 @@ class AgentEvaluator:
 
     def plot_comparison(self):
         """Generate comparison plots"""
+        plt.style.use('seaborn')  # Use a style that's easier on memory
         fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # Plot rewards
@@ -260,8 +273,9 @@ class AgentEvaluator:
         axes[1, 1].legend()
         
         plt.tight_layout()
-        plt.savefig('evaluation_results/comparison_plots.png')
+        plt.savefig('evaluation_results/comparison_plots.png', dpi=100)  # Lower DPI to reduce memory usage
         plt.close()
+        gc.collect()  # Force garbage collection after plotting
 
 def main():
     try:
@@ -273,6 +287,7 @@ def main():
     finally:
         try:
             pygame.quit()
+            gc.collect()
         except:
             pass
 
