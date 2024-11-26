@@ -49,6 +49,8 @@ class AgentEvaluator:
     def train_and_evaluate_agent(self, agent, env, train_episodes=20, eval_episodes=10, render=True, agent_name=""):
         """Train and evaluate an agent's performance"""
         try:
+            pygame.init()  # Initialize pygame at the start
+            
             # Try to load pre-trained model
             if not self.load_model(agent, agent_name):
                 print(f"\nTraining {agent_name} for {train_episodes} episodes...")
@@ -70,11 +72,11 @@ class AgentEvaluator:
             wins = 0
             completions = 0
             
-            # Reinitialize environment for evaluation
+            # Create new environment instance for evaluation
             env.close()
             pygame.quit()
             pygame.init()
-            env = type(env)()  # Create new instance of same env type
+            env = type(env)()
             
             for episode in range(eval_episodes):
                 state, info = env.reset()
@@ -87,9 +89,8 @@ class AgentEvaluator:
                             env.render()
                             time.sleep(0.05)
                         except:
-                            pass  # Continue even if rendering fails
+                            pass
                     
-                    # Use epsilon=0.01 for evaluation (minimal exploration)
                     action = agent.select_action(state, epsilon=0.01)
                     next_state, reward, done, truncated, info = env.step(action)
                     
@@ -98,9 +99,9 @@ class AgentEvaluator:
                     state = next_state
                     
                     if done or truncated:
-                        if info['score'] > 500:  # Consider this a win
+                        if info['score'] > 500:
                             wins += 1
-                        if steps < 500:  # Consider this a completion
+                        if steps < 500:
                             completions += 1
                         break
                 
@@ -110,9 +111,11 @@ class AgentEvaluator:
                 
                 if render:
                     try:
-                        env.save_animation(f'episode_gifs/{agent_name.lower().replace(" ", "_")}_episode_{episode+1}.gif')
+                        gif_path = f'episode_gifs/{agent_name.lower().replace(" ", "_")}_eval_{episode+1}.gif'
+                        env.save_animation(gif_path)
+                        print(f"Saved animation to {gif_path}")
                     except:
-                        pass  # Continue even if saving animation fails
+                        pass
                 
                 print(f"Episode {episode+1}/{eval_episodes} - Score: {info['score']} - Steps: {steps}")
             
@@ -125,7 +128,6 @@ class AgentEvaluator:
             
         except Exception as e:
             print(f"Error during {agent_name} evaluation: {e}")
-            # Return empty metrics if evaluation fails
             return {
                 'rewards': [],
                 'steps': [],
@@ -147,12 +149,12 @@ class AgentEvaluator:
             # Initialize environments and agents
             basic_env = PacmanEnv()
             sophisticated_env = SophisticatedPacmanEnv()
-            dueling_env = SophisticatedPacmanEnv()  # Using sophisticated env for dueling since it has 15 actions
+            dueling_env = SophisticatedPacmanEnv()
             
             state_shape = (20, 20, 3)
             basic_agent = StrategicAgent(state_shape, action_size=4)
             sophisticated_agent = SophisticatedAgent(state_shape)
-            dueling_agent = DuelingDQNAgent(state_shape)  # Removed action_size parameter
+            dueling_agent = DuelingDQNAgent(state_shape)
             
             # Train and evaluate each agent
             basic_metrics = self.train_and_evaluate_agent(
@@ -264,7 +266,6 @@ class AgentEvaluator:
 def main():
     try:
         evaluator = AgentEvaluator()
-        # Set to 20 training episodes for faster completion
         evaluator.compare_agents(train_episodes=20, eval_episodes=10)
         print("\nEvaluation complete! Results saved to evaluation_results/")
     except Exception as e:
