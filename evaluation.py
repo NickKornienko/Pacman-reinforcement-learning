@@ -1,5 +1,5 @@
 """
-Evaluation and comparison module for DQN variants and A2C
+Evaluation and comparison module for DQN variants and A2C with extended training
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -16,10 +16,10 @@ from a2c_agent import A2CAgent
 from pacman_env import PacmanEnv
 from pacman_wrapper import SophisticatedPacmanEnv
 
-# Create directories for saving
-os.makedirs("trained_models", exist_ok=True)
-os.makedirs("episode_gifs", exist_ok=True)
-os.makedirs("evaluation_results", exist_ok=True)
+# Create directories for extended training results
+os.makedirs("extended_trained_models", exist_ok=True)
+os.makedirs("extended_episode_gifs", exist_ok=True)
+os.makedirs("extended_evaluation_results", exist_ok=True)
 
 class AgentEvaluator:
     def __init__(self):
@@ -28,7 +28,7 @@ class AgentEvaluator:
     
     def save_model(self, agent, agent_name):
         """Save trained model"""
-        model_path = f"trained_models/{agent_name.lower().replace(' ', '_')}.pth"
+        model_path = f"extended_trained_models/{agent_name.lower().replace(' ', '_')}.pth"
         if isinstance(agent, A2CAgent):
             torch.save({
                 'actor_state_dict': agent.actor.state_dict(),
@@ -46,7 +46,7 @@ class AgentEvaluator:
     
     def load_model(self, agent, agent_name):
         """Load trained model"""
-        model_path = f"trained_models/{agent_name.lower().replace(' ', '_')}.pth"
+        model_path = f"extended_trained_models/{agent_name.lower().replace(' ', '_')}.pth"
         if os.path.exists(model_path):
             checkpoint = torch.load(model_path)
             if isinstance(agent, A2CAgent):
@@ -62,7 +62,7 @@ class AgentEvaluator:
             return True
         return False
     
-    def train_agent(self, agent, env_class, train_episodes=30, agent_name=""):
+    def train_agent(self, agent, env_class, train_episodes=500, agent_name=""):
         """Train an agent"""
         print(f"\nTraining {agent_name} for {train_episodes} episodes...")
         
@@ -128,7 +128,7 @@ class AgentEvaluator:
                 
                 if render and episode % 2 == 0:
                     try:
-                        gif_path = f'episode_gifs/{agent_name.lower().replace(" ", "_")}_eval_{episode+1}.gif'
+                        gif_path = f'extended_episode_gifs/{agent_name.lower().replace(" ", "_")}_eval_{episode+1}.gif'
                         env.save_animation(gif_path)
                         print(f"Saved animation to {gif_path}")
                     except:
@@ -159,7 +159,7 @@ class AgentEvaluator:
             env.close()
             gc.collect()
 
-    def train_and_evaluate_all(self, train_episodes=30, eval_episodes=10):
+    def train_and_evaluate_all(self, train_episodes=500, eval_episodes=10):
         """Train and evaluate all agents"""
         try:
             # Initialize agents
@@ -170,7 +170,7 @@ class AgentEvaluator:
             a2c_agent = A2CAgent(state_shape)
             
             # Train all agents
-            print("\nStarting training phase...")
+            print("\nStarting extended training phase...")
             if not all([
                 self.train_agent(basic_agent, PacmanEnv, train_episodes, "Basic DQN"),
                 self.train_agent(sophisticated_agent, SophisticatedPacmanEnv, train_episodes, "Sophisticated DQN"),
@@ -239,9 +239,9 @@ class AgentEvaluator:
 
     def save_metrics(self):
         """Save evaluation metrics to file"""
-        results_path = "evaluation_results/metrics.txt"
+        results_path = "extended_evaluation_results/metrics.txt"
         with open(results_path, 'w') as f:
-            f.write("Performance Comparison:\n")
+            f.write("Extended Training Performance Comparison:\n")
             f.write("-" * 80 + "\n")
             f.write(f"Metric              | Basic DQN  | Sophisticated DQN | Dueling DQN | A2C\n")
             f.write("-" * 80 + "\n")
@@ -301,15 +301,15 @@ class AgentEvaluator:
         axes[1, 1].legend()
         
         plt.tight_layout()
-        plt.savefig('evaluation_results/comparison_plots.png', dpi=100)
+        plt.savefig('extended_evaluation_results/comparison_plots.png', dpi=100)
         plt.close()
         gc.collect()
 
 def main():
     try:
         evaluator = AgentEvaluator()
-        evaluator.train_and_evaluate_all(train_episodes=30, eval_episodes=10)
-        print("\nTraining and evaluation complete! Results saved to evaluation_results/")
+        evaluator.train_and_evaluate_all(train_episodes=500, eval_episodes=10)
+        print("\nExtended training and evaluation complete! Results saved to extended_evaluation_results/")
     except Exception as e:
         print(f"Error during evaluation: {e}")
     finally:
