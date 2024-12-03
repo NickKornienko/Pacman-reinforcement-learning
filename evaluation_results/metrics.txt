@@ -1,0 +1,28 @@
+Performance Comparison:
+--------------------------------------------------------------------------------
+Metric              | Basic DQN  | Sophisticated DQN | Dueling DQN | A2C
+--------------------------------------------------------------------------------
+Agent: basic_dqn
+Average Score: 46.00
+Win Rate: 0.00%
+Completion Rate: 80.00%
+Average Steps: 244.10
+
+Agent: sophisticated_dqn
+Average Score: 28.00
+Win Rate: 0.00%
+Completion Rate: 70.00%
+Average Steps: 437.50
+
+Agent: dueling_dqn
+Average Score: 13.00
+Win Rate: 0.00%
+Completion Rate: 60.00%
+Average Steps: 507.70
+
+Agent: a2c
+Average Score: 121.00
+Win Rate: 0.00%
+Completion Rate: 70.00%
+Average Steps: 322.30
+

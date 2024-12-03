@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Training artifacts
+trained_models/
+episode_gifs/
+*.pth
+*.gif
+*.png
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+.DS_Store
